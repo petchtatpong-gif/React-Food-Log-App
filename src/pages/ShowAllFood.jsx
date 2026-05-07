@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase, TABLE, STORAGE_BUCKET } from '../lib/supabase'
+import { supabase, TABLE, STORAGE_BUCKET, IS_DEMO_MODE, demoStorage } from '../lib/supabase'
 import AppHeader from '../components/AppHeader'
 import Footer from '../components/Footer'
 
@@ -15,18 +15,31 @@ export default function ShowAllFood() {
 
   async function fetchFoods() {
     setLoading(true)
-    const { data, error: err } = await supabase
-      .from(TABLE)
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (err) setError(err.message)
-    else setFoods(data || [])
+    setError('')
+
+    if (IS_DEMO_MODE) {
+      try {
+        const demoFoods = demoStorage.getFoods()
+        setFoods(demoFoods)
+      } catch (e) {
+        setError('เกิดข้อผิดพลาดในการโหลดข้อมูล')
+      }
+    } else {
+      const { data, error: err } = await supabase
+        .from(TABLE)
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (err) setError(err.message)
+      else setFoods(data || [])
+    }
+
     setLoading(false)
   }
 
   function getImageUrl(url) {
     if (!url) return null
-    if (url.startsWith('http')) return url
+    if (url.startsWith('http') || url.startsWith('blob:')) return url
+    if (IS_DEMO_MODE) return url // Already a blob URL
     const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(url)
     return data?.publicUrl || null
   }
@@ -36,15 +49,22 @@ export default function ShowAllFood() {
     if (!ok) return
     setError('')
     try {
-      // Delete image from storage if exists
-      if (food.food_image_url && !food.food_image_url.startsWith('http')) {
-        await supabase.storage.from(STORAGE_BUCKET).remove([food.food_image_url])
+      if (IS_DEMO_MODE) {
+        demoStorage.deleteFood(food.id)
+        setFoods(prev => prev.filter(f => f.id !== food.id))
+        setSuccess('✅ ลบข้อมูลสำเร็จ')
+        setTimeout(() => setSuccess(''), 3000)
+      } else {
+        // Delete image from storage if exists
+        if (food.food_image_url && !food.food_image_url.startsWith('http')) {
+          await supabase.storage.from(STORAGE_BUCKET).remove([food.food_image_url])
+        }
+        const { error: err } = await supabase.from(TABLE).delete().eq('id', food.id)
+        if (err) throw new Error(err.message)
+        setFoods(prev => prev.filter(f => f.id !== food.id))
+        setSuccess('✅ ลบข้อมูลสำเร็จ')
+        setTimeout(() => setSuccess(''), 3000)
       }
-      const { error: err } = await supabase.from(TABLE).delete().eq('id', food.id)
-      if (err) throw new Error(err.message)
-      setFoods(prev => prev.filter(f => f.id !== food.id))
-      setSuccess('✅ ลบข้อมูลสำเร็จ')
-      setTimeout(() => setSuccess(''), 3000)
     } catch (e) {
       setError('⚠️ ลบไม่สำเร็จ: ' + e.message)
     }
@@ -59,6 +79,12 @@ export default function ShowAllFood() {
     <div className="page-wrap">
       <div className="card">
         <AppHeader subtitle="🍔 🍟 🌭 ข้อมูลการกินทั้งหมด 🥙 🌮 🫔" />
+
+        {IS_DEMO_MODE && (
+          <div style={{ background: '#fff3cd', color: '#856404', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
+            📱 <strong>Demo Mode:</strong> ข้อมูลจะถูกเก็บในเบราว์เซอร์ของคุณเท่านั้น
+          </div>
+        )}
 
         {error && <div className="error-msg">{error}</div>}
         {success && <div style={{ background: '#d4edda', color: '#155724', padding: 12, borderRadius: 6, marginBottom: 16 }}>{success}</div>}

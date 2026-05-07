@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase, TABLE, STORAGE_BUCKET } from '../lib/supabase'
+import { supabase, TABLE, STORAGE_BUCKET, IS_DEMO_MODE, demoStorage } from '../lib/supabase'
 import AppHeader from '../components/AppHeader'
 import Footer from '../components/Footer'
 
@@ -27,6 +27,11 @@ export default function AddFood() {
   }
 
   async function uploadImage(file) {
+    if (IS_DEMO_MODE) {
+      // In demo mode, just return a blob URL
+      return URL.createObjectURL(file)
+    }
+
     const ext = file.name.split('.').pop()
     const path = `food_${Date.now()}.${ext}`
     const { error: err } = await supabase.storage
@@ -59,14 +64,26 @@ export default function AddFood() {
     try {
       let imageUrl = null
       if (file) imageUrl = await uploadImage(file)
-      const { error: err } = await supabase.from(TABLE).insert([{
-        food_name: trimmedName,
-        food_where: form.food_where?.trim() || null,
-        food_person: form.food_person?.trim() || null,
-        food_pay: form.food_pay ? parseFloat(form.food_pay) : null,
-        food_image_url: imageUrl,
-      }])
-      if (err) throw new Error(err.message)
+
+      if (IS_DEMO_MODE) {
+        demoStorage.addFood({
+          food_name: trimmedName,
+          food_where: form.food_where?.trim() || null,
+          food_person: form.food_person?.trim() || null,
+          food_pay: form.food_pay ? parseFloat(form.food_pay) : null,
+          food_image_url: imageUrl,
+        })
+      } else {
+        const { error: err } = await supabase.from(TABLE).insert([{
+          food_name: trimmedName,
+          food_where: form.food_where?.trim() || null,
+          food_person: form.food_person?.trim() || null,
+          food_pay: form.food_pay ? parseFloat(form.food_pay) : null,
+          food_image_url: imageUrl,
+        }])
+        if (err) throw new Error(err.message)
+      }
+
       navigate('/showallfood')
     } catch (e) {
       setError(e.message)
@@ -78,6 +95,12 @@ export default function AddFood() {
     <div className="page-wrap">
       <div className="card">
         <AppHeader subtitle="🍔 🍟 🌭 เพิ่มข้อมูลการกิน 🥙 🌮 🫔" />
+
+        {IS_DEMO_MODE && (
+          <div style={{ background: '#d1ecf1', color: '#0c5460', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
+            💾 <strong>Demo Mode:</strong> รูปภาพจะถูกเก็บในหน่วยความจำชั่วคราว
+          </div>
+        )}
 
         {error && <div className="error-msg">⚠️ {error}</div>}
 

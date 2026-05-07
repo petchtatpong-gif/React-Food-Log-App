@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { supabase, TABLE, STORAGE_BUCKET } from '../lib/supabase'
+import { supabase, TABLE, STORAGE_BUCKET, IS_DEMO_MODE, demoStorage } from '../lib/supabase'
 import AppHeader from '../components/AppHeader'
 import Footer from '../components/Footer'
 
@@ -20,24 +20,43 @@ export default function EditFood() {
 
   useEffect(() => {
     async function load() {
-      const { data, error: err } = await supabase.from(TABLE).select('*').eq('id', id).single()
-      if (err || !data) { setError('ไม่พบข้อมูล'); setFetching(false); return }
-      setForm({
-        food_name: data.food_name || '',
-        food_where: data.food_where || '',
-        food_person: data.food_person || '',
-        food_pay: data.food_pay ?? '',
-      })
-      setExistingImagePath(data.food_image_url)
-      if (data.food_image_url) {
-        if (data.food_image_url.startsWith('http')) {
-          setPreview(data.food_image_url)
+      setFetching(true)
+      setError('')
+
+      try {
+        let data = null
+
+        if (IS_DEMO_MODE) {
+          const foods = demoStorage.getFoods()
+          data = foods.find(f => f.id === parseInt(id))
         } else {
-          const { data: urlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(data.food_image_url)
-          setPreview(urlData?.publicUrl || null)
+          const { data: fetchedData, error: err } = await supabase.from(TABLE).select('*').eq('id', id).single()
+          if (err || !fetchedData) throw new Error('ไม่พบข้อมูล')
+          data = fetchedData
         }
+
+        if (!data) throw new Error('ไม่พบข้อมูล')
+
+        setForm({
+          food_name: data.food_name || '',
+          food_where: data.food_where || '',
+          food_person: data.food_person || '',
+          food_pay: data.food_pay ?? '',
+        })
+        setExistingImagePath(data.food_image_url)
+        if (data.food_image_url) {
+          if (data.food_image_url.startsWith('http')) {
+            setPreview(data.food_image_url)
+          } else if (!IS_DEMO_MODE) {
+            const { data: urlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(data.food_image_url)
+            setPreview(urlData?.publicUrl || null)
+          }
+        }
+      } catch (e) {
+        setError(e.message)
+      } finally {
+        setFetching(false)
       }
-      setFetching(false)
     }
     load()
   }, [id])
@@ -54,6 +73,11 @@ export default function EditFood() {
   }
 
   async function uploadImage(f) {
+    if (IS_DEMO_MODE) {
+      // In demo mode, just return a blob URL
+      return URL.createObjectURL(f)
+    }
+
     const ext = f.name.split('.').pop()
     const path = `food_${Date.now()}.${ext}`
     const { error: err } = await supabase.storage.from(STORAGE_BUCKET).upload(path, f, { upsert: true })
@@ -74,19 +98,31 @@ export default function EditFood() {
       let imageUrl = existingImagePath
       if (file) {
         // Delete old image
-        if (existingImagePath && !existingImagePath.startsWith('http')) {
+        if (existingImagePath && !existingImagePath.startsWith('http') && !IS_DEMO_MODE) {
           await supabase.storage.from(STORAGE_BUCKET).remove([existingImagePath])
         }
         imageUrl = await uploadImage(file)
       }
-      const { error: err } = await supabase.from(TABLE).update({
-        food_name: trimmedName,
-        food_where: form.food_where?.trim() || null,
-        food_person: form.food_person?.trim() || null,
-        food_pay: form.food_pay ? parseFloat(form.food_pay) : null,
-        food_image_url: imageUrl,
-      }).eq('id', id)
-      if (err) throw new Error(err.message)
+
+      if (IS_DEMO_MODE) {
+        demoStorage.updateFood(parseInt(id), {
+          food_name: trimmedName,
+          food_where: form.food_where?.trim() || null,
+          food_person: form.food_person?.trim() || null,
+          food_pay: form.food_pay ? parseFloat(form.food_pay) : null,
+          food_image_url: imageUrl,
+        })
+      } else {
+        const { error: err } = await supabase.from(TABLE).update({
+          food_name: trimmedName,
+          food_where: form.food_where?.trim() || null,
+          food_person: form.food_person?.trim() || null,
+          food_pay: form.food_pay ? parseFloat(form.food_pay) : null,
+          food_image_url: imageUrl,
+        }).eq('id', id)
+        if (err) throw new Error(err.message)
+      }
+
       navigate('/showallfood')
     } catch (e) {
       setError(e.message)
@@ -104,6 +140,12 @@ export default function EditFood() {
     <div className="page-wrap">
       <div className="card">
         <AppHeader subtitle="🍔 🍟 🌭 แก้ไขข้อมูลการกิน 🥙 🌮 🫔" />
+
+        {IS_DEMO_MODE && (
+          <div style={{ background: '#d1ecf1', color: '#0c5460', padding: 12, borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
+            💾 <strong>Demo Mode:</strong> รูปภาพจะถูกเก็บในหน่วยความจำชั่วคราว
+          </div>
+        )}
 
         {error && <div className="error-msg">⚠️ {error}</div>}
 
